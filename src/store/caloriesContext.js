@@ -1,48 +1,100 @@
-import React, { createContext, useContext, useEffect, useMemo, useState } from 'react';
+// src/store/caloriesContext.js
+import React, { createContext, useContext, useState, useEffect } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { format } from 'date-fns';
 
-const CaloriesContext = createContext(null);
+const CaloriesContext = createContext();
 
-export function CaloriesProvider({ children }) {
-  const [dailyLimit, setDailyLimit] = useState(2000);
-  const [entries, setEntries] = useState([]); // { id, name, kcal, timestamp }
-
-  // Clé de stockage liée à la date (ex: nutrisnap:2025-09-22)
-  const todayKey = useMemo(() => `nutrisnap:${format(new Date(), 'yyyy-MM-dd')}`, []);
-
-  // 1) Au montage, on charge ce qui a été sauvegardé pour AUJOURD’HUI
-  useEffect(() => {
-    (async () => {
-      try {
-        const raw = await AsyncStorage.getItem(todayKey);
-        if (raw) {
-          const parsed = JSON.parse(raw);
-          if (parsed.limit) setDailyLimit(parsed.limit);
-          if (parsed.entries) setEntries(parsed.entries);
-        }
-      } catch (e) {
-        console.warn('Failed to load local data', e);
-      }
-    })();
-  }, [todayKey]);
-
-  // 2) À chaque changement (limite ou entrées), on sauvegarde
-  useEffect(() => {
-    AsyncStorage.setItem(todayKey, JSON.stringify({ limit: dailyLimit, entries }))
-      .catch((e) => console.warn('Failed to save local data', e));
-  }, [todayKey, dailyLimit, entries]);
-
-  // Fonctions utilitaires : ajouter/supprimer une entrée, calculer le total
-  const addEntry = (item) =>
-    setEntries((prev) => [{ id: Date.now().toString(), timestamp: Date.now(), ...item }, ...prev]);
-
-  const removeEntry = (id) => setEntries((prev) => prev.filter((e) => e.id !== id));
-
-  const totalKcal = entries.reduce((s, e) => s + (e.kcal || 0), 0);
-
-  const value = { dailyLimit, setDailyLimit, entries, addEntry, removeEntry, totalKcal };
-  return <CaloriesContext.Provider value={value}>{children}</CaloriesContext.Provider>;
+export function useCalories() {
+  const context = useContext(CaloriesContext);
+  if (!context) {
+    throw new Error('useCalories must be used within CaloriesProvider');
+  }
+  return context;
 }
 
-export const useCalories = () => useContext(CaloriesContext);
+export function CaloriesProvider({ children }) {
+  const [entries, setEntries] = useState([]);
+  const [dailyLimit, setDailyLimit] = useState(2000);
+
+  // Calculer le total des kcal
+  const totalKcal = entries.reduce((sum, entry) => sum + (entry.kcal || 0), 0);
+
+  // Charger les données au démarrage
+  useEffect(() => {
+    loadData();
+  }, []);
+
+  const loadData = async () => {
+    try {
+      const today = new Date().toISOString().split('T')[0]; // YYYY-MM-DD
+      
+      // Charger les entrées du jour
+      const entriesData = await AsyncStorage.getItem(`entries_${today}`);
+      if (entriesData) {
+        setEntries(JSON.parse(entriesData));
+      }
+
+      // Charger la limite quotidienne
+      const limitData = await AsyncStorage.getItem('dailyLimit');
+      if (limitData) {
+        setDailyLimit(parseInt(limitData, 10));
+      }
+    } catch (error) {
+      console.error('Error loading data:', error);
+    }
+  };
+
+  const saveEntries = async (newEntries) => {
+    try {
+      const today = new Date().toISOString().split('T')[0];
+      await AsyncStorage.setItem(`entries_${today}`, JSON.stringify(newEntries));
+    } catch (error) {
+      console.error('Error saving entries:', error);
+    }
+  };
+
+  const saveDailyLimit = async (limit) => {
+    try {
+      await AsyncStorage.setItem('dailyLimit', String(limit));
+    } catch (error) {
+      console.error('Error saving daily limit:', error);
+    }
+  };
+
+  const addEntry = (entry) => {
+    const newEntry = {
+      id: Date.now().toString(),
+      timestamp: new Date().toISOString(),
+      ...entry,
+    };
+    const newEntries = [newEntry, ...entries];
+    setEntries(newEntries);
+    saveEntries(newEntries);
+  };
+
+  const removeEntry = (id) => {
+    const newEntries = entries.filter(entry => entry.id !== id);
+    setEntries(newEntries);
+    saveEntries(newEntries);
+  };
+
+  const updateDailyLimit = (limit) => {
+    setDailyLimit(limit);
+    saveDailyLimit(limit);
+  };
+
+  const value = {
+    entries,
+    dailyLimit,
+    totalKcal,
+    addEntry,
+    removeEntry,
+    setDailyLimit: updateDailyLimit,
+  };
+
+  return (
+    <CaloriesContext.Provider value={value}>
+      {children}
+    </CaloriesContext.Provider>
+  );
+}
