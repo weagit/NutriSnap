@@ -1,78 +1,45 @@
 // src/services/apiClient.js
 import { readAsStringAsync } from 'expo-file-system/legacy';
 
-const GROQ_API_KEY = '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';
+const GROQ_API_KEY = VITE_GROQ_API_KEY;
 const GROQ_URL = 'https://api.groq.com/openai/v1/chat/completions';
 
-// Base de données simple des calories par plat
-const FOOD_CALORIES = {
-  // Pizza
-  'pizza': 280,
-  'pizza margherita': 250,
-  'pizza pepperoni': 320,
-  'pizza hawaii': 270,
-  
-  // Burgers
-  'burger': 350,
-  'hamburger': 350,
-  'cheeseburger': 400,
-  'big mac': 550,
-  
-  // Pâtes
-  'pasta': 220,
-  'spaghetti': 220,
-  'spaghetti bolognese': 320,
-  'carbonara': 400,
-  'lasagna': 380,
-  
-  // Viandes
-  'chicken': 200,
-  'steak': 300,
-  'fish': 180,
-  'salmon': 250,
-  
-  // Salades
-  'salad': 150,
-  'caesar salad': 200,
-  'greek salad': 180,
-  
-  // Sandwichs
-  'sandwich': 250,
-  'club sandwich': 350,
-  'panini': 300,
-  
-  // Plats asiatiques
-  'sushi': 200,
-  'ramen': 400,
-  'fried rice': 300,
-  'pad thai': 350,
-  
-  // Desserts
-  'cake': 350,
-  'ice cream': 200,
-  'donut': 250,
-  'cookie': 150,
-  
-  // Petit déjeuner
-  'croissant': 180,
-  'toast': 120,
-  'pancakes': 300,
-  'eggs': 150,
-  
-  // Défaut
-  'meal': 300,
-  'food': 300,
-  'dish': 300
-};
-
-export async function analyzeMealFromImageAsync(imageUri) {
+// 🤖 VERSION FULL IA : Groq calcule TOUT !
+export async function analyzeMealFromImageAsync(imageUri, voiceDetails = '') {
   try {
     // 1. Lire l'image en base64
     const base64 = await readAsStringAsync(imageUri, {
       encoding: 'base64',
     });
 
-    // 2. Appel à Groq Vision
+    // 2. 🎯 Construire le prompt COMPLET pour Groq
+    let textPrompt = `You are a nutrition expert. Analyze this meal image and estimate:
+1. The food name
+2. Total calories (kcal) based on the visible portion size
+3. Macronutrients: protein (g), carbs (g), fat (g)
+
+Respond ONLY with valid JSON in this exact format:
+{"name": "Pizza Margherita", "kcal": 450, "protein": 18, "carbs": 55, "fat": 16}
+
+Be realistic about portion sizes visible in the image.`;
+
+    // 🎤 Si l'user a ajouté des détails vocaux, on les inclut
+    if (voiceDetails && voiceDetails.trim().length > 0) {
+      textPrompt = `You are a nutrition expert. Analyze this meal image and estimate:
+1. The food name
+2. Total calories (kcal) based on the visible portion size
+3. Macronutrients: protein (g), carbs (g), fat (g)
+
+IMPORTANT: The user provided these additional details about the meal: "${voiceDetails}"
+Take these details into account when estimating calories (e.g., "extra cheese" adds calories, "light version" reduces them, "with cream" adds fat, etc.).
+
+Respond ONLY with valid JSON in this exact format:
+{"name": "Pizza Margherita with extra cheese", "kcal": 580, "protein": 24, "carbs": 58, "fat": 22}
+
+Be realistic about portion sizes and adjust for the user's specifications.`;
+    }
+
+    // 3. 🚀 Appel à Groq Vision avec prompt complet
     const response = await fetch(GROQ_URL, {
       method: 'POST',
       headers: {
@@ -87,7 +54,7 @@ export async function analyzeMealFromImageAsync(imageUri) {
             content: [
               {
                 type: 'text',
-                text: 'What food is in this image? Answer with just the food name in lowercase, like "pizza" or "burger".'
+                text: textPrompt
               },
               {
                 type: 'image_url',
@@ -98,74 +65,76 @@ export async function analyzeMealFromImageAsync(imageUri) {
             ]
           }
         ],
-        max_completion_tokens: 10,
-        temperature: 0
+        max_completion_tokens: 150,
+        temperature: 0.3, // Un peu de créativité pour les estimations
+        response_format: { type: "json_object" } // Force JSON response
       })
     });
 
     if (!response.ok) {
+      const errorText = await response.text();
+      console.error('Groq API error:', response.status, errorText);
       throw new Error(`Groq API error: ${response.status}`);
     }
 
     const data = await response.json();
-    const detectedFood = data.choices[0]?.message?.content?.trim().toLowerCase();
+    const rawContent = data.choices[0]?.message?.content;
 
-    if (!detectedFood) {
-      throw new Error('No food detected');
+    if (!rawContent) {
+      throw new Error('No response from Groq');
     }
 
-    // 3. Chercher les calories dans notre base
-    let calories = FOOD_CALORIES[detectedFood];
-    let foodName = detectedFood;
-
-    // Si pas trouvé exactement, chercher par mots-clés
-    if (!calories) {
-      for (const [key, cal] of Object.entries(FOOD_CALORIES)) {
-        if (detectedFood.includes(key) || key.includes(detectedFood)) {
-          calories = cal;
-          foodName = key;
-          break;
-        }
-      }
+    // 4. 🧠 Parser la réponse JSON de Groq
+    let aiResult;
+    try {
+      // Nettoyer la réponse au cas où Groq ajoute du texte autour
+      const jsonMatch = rawContent.match(/\{[\s\S]*\}/);
+      const jsonString = jsonMatch ? jsonMatch[0] : rawContent;
+      aiResult = JSON.parse(jsonString);
+    } catch (parseError) {
+      console.error('JSON parse error:', parseError, 'Raw:', rawContent);
+      throw new Error('Could not parse AI response');
     }
 
-    // Valeur par défaut si rien trouvé
-    if (!calories) {
-      calories = 300;
-      foodName = detectedFood || 'unknown dish';
+    // 5. ✅ Valider et formater les données
+    const name = aiResult.name || 'Unknown meal';
+    const kcal = parseInt(aiResult.kcal) || 300;
+    const protein = parseInt(aiResult.protein) || Math.round(kcal * 0.15 / 4);
+    const carbs = parseInt(aiResult.carbs) || Math.round(kcal * 0.50 / 4);
+    const fat = parseInt(aiResult.fat) || Math.round(kcal * 0.35 / 9);
+
+    // 6. 📝 Créer la description finale
+    let description = `AI Analysis: ${name}. Estimated ${kcal} kcal per serving.`;
+    
+    if (voiceDetails && voiceDetails.trim().length > 0) {
+      description += ` (Adjusted for: "${voiceDetails}")`;
     }
-
-    // 4. Ajouter une petite variation pour être plus réaliste
-    const variation = Math.floor(Math.random() * 40) - 20; // ±20 calories
-    const finalCalories = Math.max(50, calories + variation);
-
-    // 5. Créer la description
-    const confidence = Math.floor(Math.random() * 15) + 85; // 85-99%
-    const description = `Detected: ${foodName} (${confidence}% confidence). Estimated calories: ~${finalCalories} kcal per serving.`;
 
     return {
-      name: foodName.charAt(0).toUpperCase() + foodName.slice(1), // Capitaliser
-      kcal: finalCalories,
+      name: name,
+      kcal: kcal,
       macros: {
-        protein: Math.round(finalCalories * 0.15 / 4), // 15% protein
-        carbs: Math.round(finalCalories * 0.50 / 4),   // 50% carbs  
-        fat: Math.round(finalCalories * 0.35 / 9)      // 35% fat
+        protein: protein,
+        carbs: carbs,
+        fat: fat
       },
-      description,
-      confidence,
-      source: 'groq-vision'
+      description: description,
+      confidence: 95, // Confiance élevée car c'est l'IA qui calcule
+      voiceDetails: voiceDetails || null,
+      source: 'groq-full-ai'
     };
 
   } catch (error) {
     console.error('Analysis error:', error);
     
-    // Fallback en cas d'erreur
+    // 🆘 Fallback en cas d'erreur (pour pas bloquer l'app)
     return {
       name: 'Unknown meal',
       kcal: 300,
       macros: { protein: 15, carbs: 35, fat: 12 },
-      description: 'Could not analyze image. Estimated ~300 kcal.',
+      description: 'Could not analyze image. Using default estimate ~300 kcal. Please try again.',
       confidence: null,
+      voiceDetails: voiceDetails || null,
       source: 'fallback'
     };
   }
