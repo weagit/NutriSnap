@@ -1,6 +1,7 @@
 // src/store/caloriesContext.js
 import React, { createContext, useContext, useState, useEffect } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { APP_CONFIG, COLORS } from '../constants/constants';
 
 const CaloriesContext = createContext();
 
@@ -14,7 +15,7 @@ export function useCalories() {
 
 export function CaloriesProvider({ children }) {
   const [entries, setEntries] = useState([]);
-  const [dailyLimit, setDailyLimit] = useState(2000);
+  const [dailyLimit, setDailyLimit] = useState(APP_CONFIG.DEFAULT_DAILY_LIMIT);
 
   // Calculer le total des kcal
   const totalKcal = entries.reduce((sum, entry) => sum + (entry.kcal || 0), 0);
@@ -65,7 +66,12 @@ export function CaloriesProvider({ children }) {
     const newEntry = {
       id: Date.now().toString(),
       timestamp: new Date().toISOString(),
-      ...entry,
+      name: entry.name,
+      kcal: entry.kcal,
+      macros: entry.macros || null,
+      description: entry.description || null,
+      reasoning: entry.reasoning || null,
+      additionalDetails: entry.additionalDetails || null,
     };
     const newEntries = [newEntry, ...entries];
     setEntries(newEntries);
@@ -83,6 +89,49 @@ export function CaloriesProvider({ children }) {
     saveDailyLimit(limit);
   };
 
+  // Préparer les données pour la chart
+  const getChartData = () => {
+    if (entries.length === 0) {
+      return {
+        labels: ['No data'],
+        datasets: [{ data: [0] }]
+      };
+    }
+
+    // Trier par timestamp (plus ancien au plus récent)
+    const sorted = [...entries].sort((a, b) => 
+      new Date(a.timestamp) - new Date(b.timestamp)
+    );
+
+    // Calculer les kcal cumulées à chaque meal
+    let cumulative = 0;
+    const cumulativeData = sorted.map(entry => {
+      cumulative += entry.kcal;
+      return cumulative;
+    });
+
+    // Labels = heures des meals
+    const labels = sorted.map(entry => {
+      const date = new Date(entry.timestamp);
+      return `${date.getHours()}:${String(date.getMinutes()).padStart(2, '0')}`;
+    });
+
+    // Ajouter un point de départ à 0 kcal
+    labels.unshift('Start');
+    cumulativeData.unshift(0);
+
+    return {
+      labels,
+      datasets: [
+        {
+          data: cumulativeData,
+          color: (opacity = 1) => `rgba(53, 197, 207, ${opacity})`, // Utilise COLORS.primary
+          strokeWidth: 3
+        }
+      ]
+    };
+  };
+
   const value = {
     entries,
     dailyLimit,
@@ -90,6 +139,7 @@ export function CaloriesProvider({ children }) {
     addEntry,
     removeEntry,
     setDailyLimit: updateDailyLimit,
+    getChartData,
   };
 
   return (

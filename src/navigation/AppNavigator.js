@@ -11,9 +11,9 @@ export default function AppNavigator() {
   return (
     <NavigationContainer>
       <Stack.Navigator>
-        <Stack.Screen name="Scan" component={ScanScreen} options={{ title: 'Scan a meal' }} />
-        <Stack.Screen name="Journal" component={JournalScreen} options={{ title: 'Daily journal' }} />
-        <Stack.Screen name="Settings" component={SettingsScreen} options={{ title: 'Settings' }} />
+        <Stack.Screen name="Scan" component={ScanScreen}  />
+        <Stack.Screen name="Journal" component={JournalScreen}  />
+        <Stack.Screen name="Settings" component={SettingsScreen}  />
       </Stack.Navigator>
     </NavigationContainer>
   );
