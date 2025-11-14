@@ -149,8 +149,7 @@ This project is part of an academic assignment and is for educational purposes o
 ## 👨‍💻 Author
 
 **Your Name**
-- GitHub: [@your-username](https://github.com/your-username)
-
+- GitHub: [@weagit](https://github.com/weagit)
 ---
 
 ## 🙏 Acknowledgments
